@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Dot Tracker</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg-top: #1a1a2e;
+      --bg-bottom: #0f0f1a;
+      --dot-fill: #534ab7;
+      --dot-stroke: #afa9ec;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #1a1a2e;
+      font-family: system-ui, sans-serif;
+    }
+
+    body {
+      position: relative;
+    }
+
+    #game {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      touch-action: none;
+      background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+    }
+
+    .hud-button {
+      position: fixed;
+      z-index: 20;
+      right: 20px;
+      bottom: 20px;
+      width: 52px;
+      height: 52px;
+      border: 0;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 1.35rem;
+      color: #ffffff;
+      background: rgba(83, 74, 183, 0.88);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+      cursor: pointer;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(10, 10, 18, 0.72);
+      color: #ffffff;
+      text-align: center;
+      z-index: 10;
+    }
+
+    .overlay.pass-through {
+      pointer-events: none;
+    }
+
+    .overlay[hidden] {
+      display: none;
+    }
+
+    .overlay-panel {
+      min-width: 280px;
+      max-width: 420px;
+    }
+
+    .idle-overlay-content {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 220px;
+      width: min(420px, 100%);
+    }
+
+    .idle-pulse-ring {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 86px;
+      height: 86px;
+      border: 4px solid rgba(175, 169, 236, 0.42);
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      animation: idle-pulse 1.6s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    @keyframes idle-pulse {
+      0% {
+        transform: translate(-50%, -50%) scale(0.92);
+        opacity: 0.35;
+      }
+
+      60% {
+        transform: translate(-50%, -50%) scale(1.28);
+        opacity: 0.85;
+      }
+
+      100% {
+        transform: translate(-50%, -50%) scale(1.38);
+        opacity: 0.08;
+      }
+    }
+
+    .overlay-panel.settings-panel {
+      width: min(420px, 100%);
+      text-align: left;
+      padding: 28px 24px 24px;
+      border-radius: 24px;
+      background: rgba(23, 23, 38, 0.96);
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+    }
+
+    .overlay-title {
+      margin: 0 0 12px;
+      font-size: 2rem;
+      font-weight: 700;
+    }
+
+    .overlay-title.fail {
+      color: #ff5d73;
+    }
+
+    .overlay-title.win {
+      color: #8ff0a4;
+    }
+
+    .overlay-copy {
+      margin: 0 0 20px;
+      font-size: 1rem;
+      line-height: 1.5;
+      color: rgba(255, 255, 255, 0.82);
+    }
+
+    .overlay-button {
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 24px;
+      font: inherit;
+      font-weight: 600;
+      color: #ffffff;
+      background: #534ab7;
+      cursor: pointer;
+    }
+
+    .form-field {
+      margin-bottom: 18px;
+    }
+
+    .field-label,
+    .field-value {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 0.95rem;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .field-value {
+      font-weight: 600;
+    }
+
+    .field-input {
+      width: 100%;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 14px;
+      padding: 12px 14px;
+      font: inherit;
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .field-input[type="range"] {
+      padding: 0;
+      background: transparent;
+    }
+
+    .settings-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+      margin-top: 24px;
+    }
+
+    .overlay-button.secondary {
+      background: rgba(255, 255, 255, 0.12);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <button id="settingsButton" class="hud-button" type="button" aria-label="Open settings">&#9881;</button>
+  <div id="idleOverlay" class="overlay pass-through">
+    <div class="idle-overlay-content">
+      <div class="idle-pulse-ring" aria-hidden="true"></div>
+      <div class="overlay-panel" style="margin-top: 148px;">
+        <h1 class="overlay-title">Place your finger on the dot</h1>
+        <p class="overlay-copy">The game starts only when you touch the hit zone.</p>
+      </div>
+    </div>
+  </div>
+  <div id="failOverlay" class="overlay" hidden>
+    <div class="overlay-panel">
+      <h1 class="overlay-title fail">&#10005; Lost it!</h1>
+      <p class="overlay-copy">Keep your finger on the dot.</p>
+      <button id="retryButton" class="overlay-button" type="button">Retry</button>
+    </div>
+  </div>
+  <div id="winOverlay" class="overlay" hidden>
+    <div class="overlay-panel">
+      <h1 class="overlay-title win">&#10003; You did it!</h1>
+      <p id="winMessage" class="overlay-copy">Held for 0 seconds.</p>
+      <button id="playAgainButton" class="overlay-button" type="button">Play Again</button>
+    </div>
+  </div>
+  <div id="settingsOverlay" class="overlay" hidden>
+    <div class="overlay-panel settings-panel">
+      <h2 class="overlay-title">Settings</h2>
+      <div class="form-field">
+        <label class="field-label" for="durationInput">Duration (seconds)</label>
+        <input id="durationInput" class="field-input" type="number" min="5" max="60" step="1">
+      </div>
+      <div class="form-field">
+        <label class="field-label" for="speedInput">Speed</label>
+        <span id="speedValue" class="field-value">2</span>
+        <input id="speedInput" class="field-input" type="range" min="1" max="5" step="1">
+      </div>
+      <div class="settings-actions">
+        <button id="settingsCancelButton" class="overlay-button secondary" type="button">Cancel</button>
+        <button id="settingsSaveButton" class="overlay-button" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    class GameConfig {
+      static STORAGE_KEY = "dot-tracker-config";
+      static DEFAULTS = {
+        duration: 10,
+        speed: 2
+      };
+
+      constructor() {
+        const stored = this.load();
+        this.duration = stored.duration;
+        this.speed = stored.speed;
+      }
+
+      load() {
+        try {
+          const raw = window.localStorage.getItem(GameConfig.STORAGE_KEY);
+          if (!raw) {
+            return { ...GameConfig.DEFAULTS };
+          }
+
+          const parsed = JSON.parse(raw);
+          return {
+            duration: this.clampDuration(parsed.duration),
+            speed: this.clampSpeed(parsed.speed)
+          };
+        } catch (error) {
+          console.warn("Failed to load config, using defaults.", error);
+          return { ...GameConfig.DEFAULTS };
+        }
+      }
+
+      save() {
+        const payload = {
+          duration: this.clampDuration(this.duration),
+          speed: this.clampSpeed(this.speed)
+        };
+
+        this.duration = payload.duration;
+        this.speed = payload.speed;
+        window.localStorage.setItem(GameConfig.STORAGE_KEY, JSON.stringify(payload));
+      }
+
+      clampDuration(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+          return GameConfig.DEFAULTS.duration;
+        }
+        return Math.min(60, Math.max(5, Math.round(numeric)));
+      }
+
+      clampSpeed(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+          return GameConfig.DEFAULTS.speed;
+        }
+        return Math.min(5, Math.max(1, Math.round(numeric)));
+      }
+    }
+
+    class Renderer {
+      constructor(ctx, canvas) {
+        this.ctx = ctx;
+        this.canvas = canvas;
+      }
+
+      clear() {
+        const { ctx, canvas } = this;
+        const width = canvas.clientWidth || window.innerWidth;
+        const height = canvas.clientHeight || window.innerHeight;
+        const gradient = ctx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, "#1a1a2e");
+        gradient.addColorStop(1, "#0f0f1a");
+
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      drawDot(x, y, radius = 28, opacity = 1) {
+        const { ctx } = this;
+
+        ctx.save();
+        ctx.globalAlpha = opacity;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = "#534ab7";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#afa9ec";
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      drawCountdown(remaining, duration) {
+        const { ctx, canvas } = this;
+        const width = canvas.clientWidth || window.innerWidth;
+        const height = canvas.clientHeight || window.innerHeight;
+        const ratio = duration > 0 ? remaining / duration : 0;
+        let color = "#ffffff";
+
+        if (ratio < 0.25) {
+          color = "#ff5d73";
+        } else if (ratio <= 0.5) {
+          color = "#f7b955";
+        }
+
+        ctx.save();
+        ctx.font = "500 72px system-ui";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = color;
+        ctx.fillText(Math.ceil(Math.max(remaining, 0)).toString(), width / 2, height * 0.25);
+        ctx.restore();
+      }
+
+      drawHitZone(x, y, radius) {
+        const { ctx } = this;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.setLineDash([8, 8]);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      drawPointerIndicator(x, y) {
+        const { ctx } = this;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, 10, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+        ctx.fill();
+        ctx.restore();
+      }
+
+      drawConfetti(particles) {
+        const { ctx } = this;
+
+        ctx.save();
+        for (const particle of particles) {
+          ctx.save();
+          ctx.translate(particle.x, particle.y);
+          ctx.rotate(particle.rotation);
+          ctx.globalAlpha = Math.max(0, particle.life / particle.maxLife);
+          ctx.fillStyle = particle.color;
+          ctx.fillRect(-particle.size / 2, -particle.size / 2, particle.size, particle.size * 0.7);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+    }
+
+    class DotMover {
+      static MAX_DELTA = 120;
+      static TARGET_THRESHOLD = 5;
+      static SPEED_MAP = {
+        1: 0.8,
+        2: 1.5,
+        3: 2.5,
+        4: 3.8,
+        5: 5.5
+      };
+
+      constructor({ x, y, radius, speedLevel, boundsProvider }) {
+        this.x = x;
+        this.y = y;
+        this.targetX = x;
+        this.targetY = y;
+        this.radius = radius;
+        this.speedLevel = speedLevel;
+        this.speed = this.resolveSpeed(speedLevel);
+        this.boundsProvider = boundsProvider;
+      }
+
+      resolveSpeed(speedLevel) {
+        return DotMover.SPEED_MAP[speedLevel] ?? DotMover.SPEED_MAP[2];
+      }
+
+      setSpeedLevel(speedLevel) {
+        this.speedLevel = speedLevel;
+        this.speed = this.resolveSpeed(speedLevel);
+      }
+
+      setPosition(x, y) {
+        const safePoint = this.clampPoint(x, y);
+        this.x = safePoint.x;
+        this.y = safePoint.y;
+        this.targetX = safePoint.x;
+        this.targetY = safePoint.y;
+      }
+
+      update() {
+        const distance = this.distanceToTarget();
+        if (distance <= DotMover.TARGET_THRESHOLD) {
+          this.generateNextWaypoint();
+        }
+
+        const nextDistance = this.distanceToTarget();
+        if (nextDistance === 0) {
+          return;
+        }
+
+        const step = Math.min(this.speed, nextDistance);
+        const dx = this.targetX - this.x;
+        const dy = this.targetY - this.y;
+
+        this.x += (dx / nextDistance) * step;
+        this.y += (dy / nextDistance) * step;
+      }
+
+      generateNextWaypoint() {
+        const deltaX = this.randomBetween(-DotMover.MAX_DELTA, DotMover.MAX_DELTA);
+        const deltaY = this.randomBetween(-DotMover.MAX_DELTA, DotMover.MAX_DELTA);
+        const nextPoint = this.clampPoint(this.x + deltaX, this.y + deltaY);
+
+        this.targetX = nextPoint.x;
+        this.targetY = nextPoint.y;
+      }
+
+      distanceToTarget() {
+        return Math.hypot(this.targetX - this.x, this.targetY - this.y);
+      }
+
+      clampPoint(x, y) {
+        const bounds = this.boundsProvider();
+        return {
+          x: this.clamp(x, bounds.minX, bounds.maxX),
+          y: this.clamp(y, bounds.minY, bounds.maxY)
+        };
+      }
+
+      clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+      }
+
+      randomBetween(min, max) {
+        return min + Math.random() * (max - min);
+      }
+    }
+
+    class HitDetector {
+      static HIT_PADDING = 18;
+
+      constructor() {
+        this.touchX = null;
+        this.touchY = null;
+        this.pointerId = null;
+      }
+
+      updatePointer(pointerId, x, y) {
+        this.pointerId = pointerId;
+        this.touchX = x;
+        this.touchY = y;
+      }
+
+      clearPointer(pointerId = null) {
+        if (pointerId !== null && this.pointerId !== pointerId) {
+          return;
+        }
+
+        this.pointerId = null;
+        this.touchX = null;
+        this.touchY = null;
+      }
+
+      isTrackingPointer() {
+        return this.pointerId !== null && this.touchX !== null && this.touchY !== null;
+      }
+
+      isOnDot(dot) {
+        if (!this.isTrackingPointer()) {
+          return false;
+        }
+
+        const hitRadius = dot.radius + HitDetector.HIT_PADDING;
+        const distance = Math.hypot(this.touchX - dot.x, this.touchY - dot.y);
+        return distance <= hitRadius;
+      }
+    }
+
+    class Timer {
+      constructor(durationSeconds) {
+        this.duration = durationSeconds;
+        this.remaining = durationSeconds;
+      }
+
+      reset(durationSeconds = this.duration) {
+        this.duration = durationSeconds;
+        this.remaining = durationSeconds;
+      }
+
+      tick(deltaMs) {
+        const nextRemaining = this.remaining - deltaMs / 1000;
+        this.remaining = Math.max(0, nextRemaining);
+        return this.remaining;
+      }
+    }
+
+    class Game {
+      constructor() {
+        this.canvas = document.getElementById("game");
+        this.ctx = this.canvas.getContext("2d");
+        this.settingsButton = document.getElementById("settingsButton");
+        this.idleOverlay = document.getElementById("idleOverlay");
+        this.failOverlay = document.getElementById("failOverlay");
+        this.winOverlay = document.getElementById("winOverlay");
+        this.settingsOverlay = document.getElementById("settingsOverlay");
+        this.retryButton = document.getElementById("retryButton");
+        this.playAgainButton = document.getElementById("playAgainButton");
+        this.winMessage = document.getElementById("winMessage");
+        this.durationInput = document.getElementById("durationInput");
+        this.speedInput = document.getElementById("speedInput");
+        this.speedValue = document.getElementById("speedValue");
+        this.settingsCancelButton = document.getElementById("settingsCancelButton");
+        this.settingsSaveButton = document.getElementById("settingsSaveButton");
+        this.config = new GameConfig();
+        this.renderer = new Renderer(this.ctx, this.canvas);
+        this.dotRadius = 28;
+        this.state = "IDLE";
+        this.pendingConfig = {
+          duration: this.config.duration,
+          speed: this.config.speed
+        };
+        this.viewport = { width: 0, height: 0 };
+        this.dotMover = new DotMover({
+          x: 0,
+          y: 0,
+          radius: this.dotRadius,
+          speedLevel: this.config.speed,
+          boundsProvider: () => this.getSafeBounds()
+        });
+        this.hitDetector = new HitDetector();
+        this.timer = new Timer(this.config.duration);
+        this.pointerIsOnDot = false;
+        this.confettiParticles = [];
+        this.lastFrameAt = 0;
+        this.fpsFrameCount = 0;
+        this.fpsWindowStartedAt = 0;
+
+        this.handleResize = this.handleResize.bind(this);
+        this.handlePointerDown = this.handlePointerDown.bind(this);
+        this.handlePointerMove = this.handlePointerMove.bind(this);
+        this.handlePointerUp = this.handlePointerUp.bind(this);
+        this.handleRetry = this.handleRetry.bind(this);
+        this.handleOpenSettings = this.handleOpenSettings.bind(this);
+        this.handleCloseSettings = this.handleCloseSettings.bind(this);
+        this.handleSaveSettings = this.handleSaveSettings.bind(this);
+        this.handleSpeedInput = this.handleSpeedInput.bind(this);
+        this.loop = this.loop.bind(this);
+      }
+
+      start() {
+        this.config.save();
+        this.handleResize();
+        window.addEventListener("resize", this.handleResize);
+        this.canvas.addEventListener("pointerdown", this.handlePointerDown, { passive: false });
+        this.canvas.addEventListener("pointermove", this.handlePointerMove, { passive: false });
+        this.canvas.addEventListener("pointerup", this.handlePointerUp, { passive: false });
+        this.canvas.addEventListener("pointercancel", this.handlePointerUp, { passive: false });
+        this.canvas.addEventListener("pointerleave", this.handlePointerUp, { passive: false });
+        this.retryButton.addEventListener("click", this.handleRetry);
+        this.playAgainButton.addEventListener("click", this.handleRetry);
+        this.settingsButton.addEventListener("click", this.handleOpenSettings);
+        this.settingsCancelButton.addEventListener("click", this.handleCloseSettings);
+        this.settingsSaveButton.addEventListener("click", this.handleSaveSettings);
+        this.speedInput.addEventListener("input", this.handleSpeedInput);
+        this.syncSettingsForm();
+        this.resetToIdle();
+        requestAnimationFrame(this.loop);
+      }
+
+      handleResize() {
+        const dpr = window.devicePixelRatio || 1;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const previousWidth = this.viewport.width;
+        const previousHeight = this.viewport.height;
+
+        this.canvas.width = Math.round(width * dpr);
+        this.canvas.height = Math.round(height * dpr);
+        this.canvas.style.width = width + "px";
+        this.canvas.style.height = height + "px";
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this.viewport.width = width;
+        this.viewport.height = height;
+        this.dotMover.setSpeedLevel(this.config.speed);
+
+        if (!previousWidth || !previousHeight) {
+          this.dotMover.setPosition(width / 2, height / 2);
+          this.dotMover.generateNextWaypoint();
+          return;
+        }
+
+        const relativeX = this.dotMover.x / previousWidth;
+        const relativeY = this.dotMover.y / previousHeight;
+        this.dotMover.setPosition(relativeX * width, relativeY * height);
+        this.dotMover.generateNextWaypoint();
+      }
+
+      getSafeBounds() {
+        const margin = this.dotRadius + 60;
+        return {
+          minX: margin,
+          maxX: Math.max(margin, this.viewport.width - margin),
+          minY: margin,
+          maxY: Math.max(margin, this.viewport.height - margin)
+        };
+      }
+
+      handlePointerDown(event) {
+        event.preventDefault();
+        if (!this.settingsOverlay.hidden) {
+          return;
+        }
+
+        if (this.state !== "IDLE") {
+          return;
+        }
+
+        const point = this.getPointerPosition(event);
+        this.hitDetector.updatePointer(event.pointerId, point.x, point.y);
+        this.pointerIsOnDot = this.hitDetector.isOnDot(this.dotMover);
+        if (this.pointerIsOnDot) {
+          this.transitionToPlaying();
+        } else {
+          this.hitDetector.clearPointer(event.pointerId);
+          this.pointerIsOnDot = false;
+        }
+      }
+
+      handlePointerMove(event) {
+        event.preventDefault();
+        if (this.hitDetector.pointerId !== event.pointerId) {
+          return;
+        }
+
+        const point = this.getPointerPosition(event);
+        this.hitDetector.updatePointer(event.pointerId, point.x, point.y);
+        this.pointerIsOnDot = this.hitDetector.isOnDot(this.dotMover);
+      }
+
+      handlePointerUp(event) {
+        event.preventDefault();
+        this.hitDetector.clearPointer(event.pointerId);
+        this.pointerIsOnDot = false;
+      }
+
+      handleRetry() {
+        this.resetToIdle();
+      }
+
+      handleOpenSettings() {
+        if (this.state === "PLAYING") {
+          return;
+        }
+
+        this.syncSettingsForm();
+        this.settingsOverlay.hidden = false;
+      }
+
+      handleCloseSettings() {
+        this.settingsOverlay.hidden = true;
+      }
+
+      handleSaveSettings() {
+        this.pendingConfig.duration = this.config.clampDuration(this.durationInput.value);
+        this.pendingConfig.speed = this.config.clampSpeed(this.speedInput.value);
+        this.config.duration = this.pendingConfig.duration;
+        this.config.speed = this.pendingConfig.speed;
+        this.config.save();
+        this.syncSettingsForm();
+        this.settingsOverlay.hidden = true;
+        if (this.state === "IDLE") {
+          this.timer.reset(this.config.duration);
+        }
+      }
+
+      handleSpeedInput() {
+        this.speedValue.textContent = this.config.clampSpeed(this.speedInput.value).toString();
+      }
+
+      getPointerPosition(event) {
+        const rect = this.canvas.getBoundingClientRect();
+        return {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        };
+      }
+
+      syncSettingsForm() {
+        this.durationInput.value = this.config.duration.toString();
+        this.speedInput.value = this.config.speed.toString();
+        this.speedValue.textContent = this.config.speed.toString();
+      }
+
+      transitionToPlaying() {
+        this.state = "PLAYING";
+        this.settingsOverlay.hidden = true;
+        this.hideOverlays();
+        this.timer.reset(this.config.duration);
+        this.dotMover.setSpeedLevel(this.config.speed);
+        this.confettiParticles = [];
+        this.vibrate([30]);
+        if (this.dotMover.distanceToTarget() <= DotMover.TARGET_THRESHOLD) {
+          this.dotMover.generateNextWaypoint();
+        }
+      }
+
+      transitionToFail() {
+        this.state = "FAIL";
+        this.vibrate([30]);
+        this.failOverlay.hidden = false;
+      }
+
+      transitionToWin() {
+        this.state = "WIN";
+        this.spawnConfetti();
+        this.vibrate([30]);
+        this.winMessage.textContent = `Held for ${this.timer.duration} seconds.`;
+        this.winOverlay.hidden = false;
+      }
+
+      resetToIdle() {
+        this.state = "IDLE";
+        this.config.save();
+        this.timer.reset(this.config.duration);
+        this.dotMover.setSpeedLevel(this.config.speed);
+        this.dotMover.setPosition(this.viewport.width / 2, this.viewport.height / 2);
+        this.dotMover.generateNextWaypoint();
+        this.hitDetector.clearPointer();
+        this.pointerIsOnDot = false;
+        this.confettiParticles = [];
+        this.settingsOverlay.hidden = true;
+        this.hideOverlays();
+      }
+
+      hideOverlays() {
+        this.idleOverlay.hidden = this.state !== "IDLE";
+        this.failOverlay.hidden = true;
+        this.winOverlay.hidden = true;
+      }
+
+      spawnConfetti() {
+        const colors = ["#ff5d73", "#f7b955", "#6dd3ff", "#8ff0a4", "#ffffff", "#afa9ec"];
+        this.confettiParticles = Array.from({ length: 60 }, (_, index) => {
+          const angle = (Math.PI * 2 * index) / 60 + Math.random() * 0.3;
+          const velocity = 2 + Math.random() * 4.5;
+          return {
+            x: this.dotMover.x,
+            y: this.dotMover.y,
+            vx: Math.cos(angle) * velocity,
+            vy: Math.sin(angle) * velocity - (2 + Math.random() * 2),
+            size: 5 + Math.random() * 6,
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 0.24,
+            life: 900 + Math.random() * 500,
+            maxLife: 900 + Math.random() * 500,
+            color: colors[index % colors.length]
+          };
+        });
+      }
+
+      updateConfetti(deltaMs) {
+        if (!this.confettiParticles.length) {
+          return;
+        }
+
+        const frameScale = deltaMs / 16.6667;
+        this.confettiParticles = this.confettiParticles
+          .map((particle) => ({
+            ...particle,
+            x: particle.x + particle.vx * frameScale,
+            y: particle.y + particle.vy * frameScale,
+            vy: particle.vy + 0.12 * frameScale,
+            rotation: particle.rotation + particle.rotationSpeed * frameScale,
+            life: particle.life - deltaMs
+          }))
+          .filter((particle) => particle.life > 0);
+      }
+
+      vibrate(pattern) {
+        if (typeof navigator.vibrate === "function") {
+          navigator.vibrate(pattern);
+        }
+      }
+
+      loop(timestamp) {
+        if (!this.lastFrameAt) {
+          this.lastFrameAt = timestamp;
+          this.fpsWindowStartedAt = timestamp;
+        }
+
+        const deltaMs = timestamp - this.lastFrameAt;
+        this.lastFrameAt = timestamp;
+        this.trackFps(timestamp, deltaMs);
+
+        if (this.state === "PLAYING") {
+          this.dotMover.update();
+          this.pointerIsOnDot = this.hitDetector.isOnDot(this.dotMover);
+
+          if (!this.pointerIsOnDot) {
+            this.transitionToFail();
+          } else {
+            this.timer.tick(deltaMs);
+          }
+
+          if (this.state === "PLAYING" && this.timer.remaining <= 0) {
+            this.transitionToWin();
+          }
+        }
+
+        if (this.state === "WIN") {
+          this.updateConfetti(deltaMs);
+        }
+
+        this.renderer.clear();
+        if (this.state === "PLAYING") {
+          this.renderer.drawCountdown(this.timer.remaining, this.timer.duration);
+          this.renderer.drawHitZone(this.dotMover.x, this.dotMover.y, this.dotRadius + HitDetector.HIT_PADDING);
+          if (this.hitDetector.isTrackingPointer()) {
+            this.renderer.drawPointerIndicator(this.hitDetector.touchX, this.hitDetector.touchY);
+          }
+        }
+        if (this.state === "FAIL") {
+          this.renderer.drawDot(this.dotMover.x, this.dotMover.y, this.dotRadius, 0.42);
+        } else {
+          this.renderer.drawDot(this.dotMover.x, this.dotMover.y, this.dotRadius);
+        }
+        if (this.state === "WIN") {
+          this.renderer.drawConfetti(this.confettiParticles);
+        }
+
+        requestAnimationFrame(this.loop);
+      }
+
+      trackFps(timestamp, deltaMs) {
+        if (deltaMs <= 0) {
+          return;
+        }
+
+        this.fpsFrameCount += 1;
+        const elapsed = timestamp - this.fpsWindowStartedAt;
+        if (elapsed >= 1000) {
+          const fps = (this.fpsFrameCount * 1000) / elapsed;
+          console.log("FPS:", fps.toFixed(1));
+          this.fpsFrameCount = 0;
+          this.fpsWindowStartedAt = timestamp;
+        }
+      }
+    }
+
+    const game = new Game();
+    game.start();
+  </script>
+</body>
+</html>
